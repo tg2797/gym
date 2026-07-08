@@ -1375,6 +1375,30 @@ function bodyLatest(key){
   return null;
 }
 
+function bodyVal(rec, key){ return (key==='w'||key==='f') ? rec[key] : rec.mes[key]; }
+
+/* latest & previous records containing key: {cur, prev} */
+function bodyPrevPair(key){
+  const arr = state.body.slice().sort((a,b)=> a.d<b.d?-1:1);
+  let cur = null, prev = null;
+  for(let i=arr.length-1;i>=0;i--){
+    const v = (key==='w'||key==='f') ? arr[i][key] : (arr[i].mes ? arr[i].mes[key] : null);
+    if(v == null) continue;
+    if(!cur) cur = arr[i];
+    else { prev = arr[i]; break; }
+  }
+  return { cur, prev };
+}
+
+/* 前回比バッジ。goalDir: +1=増が良い, -1=減が良い */
+function bodyDiffHTML(key, goalDir){
+  const p = bodyPrevPair(key);
+  if(!p.cur || !p.prev) return '';
+  const d = Math.round((bodyVal(p.cur, key) - bodyVal(p.prev, key))*10)/10;
+  const cls = d === 0 ? 'muted' : (d * goalDir > 0 ? 'up' : 'down');
+  return '<span class="'+cls+'">'+(d>0?'+':'')+fmtNum(d)+'</span>';
+}
+
 function renderBody(){
   const v = $('#view-body');
   const lw = bodyLatest('w'), lf = bodyLatest('f');
@@ -1389,8 +1413,16 @@ function renderBody(){
     }
   }
   const mesRows = MES_KEYS.map(([k, label])=>{
-    const rec = bodyLatest(k);
-    return '<div class="listrow"><span style="font-size:14.5px;font-weight:600;">'+esc(label)+'</span><span style="font-weight:800;font-variant-numeric:tabular-nums;">'+(rec ? fmtNum(rec.mes[k])+'<small style="color:#8e8e93;font-size:11px;"> cm ('+fmtMD(rec.d)+')</small>' : '<span class="muted">–</span>')+'</span></div>';
+    const pair = bodyPrevPair(k);
+    let right = '<span class="muted">–</span>';
+    if(pair.cur){
+      right = fmtNum(bodyVal(pair.cur, k))+'<small style="color:#8e8e93;font-size:11px;"> cm ('+fmtMD(pair.cur.d)+')</small>';
+      const diff = bodyDiffHTML(k, k==='waist' ? -1 : 1);
+      if(diff) right += ' <span style="font-size:11.5px;font-weight:800;">'+diff+'</span>';
+    }
+    return '<button class="listrow" style="width:100%;text-align:left;" data-act="body-chart" data-k="'+k+'">'+
+      '<span style="font-size:14.5px;font-weight:600;">'+esc(label)+'</span>'+
+      '<span style="font-weight:800;font-variant-numeric:tabular-nums;">'+right+' <span style="color:#48484a;font-weight:700;">›</span></span></button>';
   }).join('');
 
   const hist = state.body.slice().sort((a,b)=> a.d<b.d?1:-1).slice(0,7);
@@ -1402,12 +1434,12 @@ function renderBody(){
   </div>
 
   <div class="grid2">
-    <div class="card pad-s"><div class="stat-label">体重</div>
+    <button class="card pad-s" style="display:block;text-align:left;width:100%;" data-act="body-chart" data-k="w"><div class="stat-label">体重</div>
       <div class="stat-value">${lw?fmtNum(lw.w):'–'}<small>kg</small></div>
-      <div class="stat-sub">${lw?fmtMD(lw.d):''}</div></div>
-    <div class="card pad-s"><div class="stat-label">体脂肪率</div>
+      <div class="stat-sub">${lw ? fmtMD(lw.d)+(bodyDiffHTML('w',-1)?' ・ '+bodyDiffHTML('w',-1)+' 前回比':'') : ''}</div></button>
+    <button class="card pad-s" style="display:block;text-align:left;width:100%;" data-act="body-chart" data-k="f"><div class="stat-label">体脂肪率</div>
       <div class="stat-value">${lf&&lf.f!=null?fmtNum(lf.f):'–'}<small>%</small></div>
-      <div class="stat-sub">${lf?fmtMD(lf.d):''}</div></div>
+      <div class="stat-sub">${lf ? fmtMD(lf.d)+(bodyDiffHTML('f',-1)?' ・ '+bodyDiffHTML('f',-1)+' 前回比':'') : ''}</div></button>
     <div class="card pad-s"><div class="stat-label">BMI</div>
       <div class="stat-value">${bmi?fmtNum(bmi):'–'}</div>
       <div class="stat-sub">${h?'身長 '+h+'cm':'設定で身長を入力'}</div></div>
@@ -1421,8 +1453,9 @@ function renderBody(){
     <button class="btn gray" data-act="mes-add">＋ サイズを記録</button>
   </div>
 
-  <div class="sect">身体サイズ（最新）</div>
+  <div class="sect">身体サイズ（最新 ・ 前回比）</div>
   <div class="card pad-s">${mesRows}</div>
+  <div class="setnote" style="margin-top:-6px;">毎日「＋サイズを記録」で入力すると前回比が出ます。行をタップで推移グラフ。</div>
 
   <div class="sect">進捗写真</div>
   <div class="card pad-s">
@@ -2259,6 +2292,11 @@ function onClick(e){
     case 'rest-skip': restStop(); break;
 
     /* ---- body ---- */
+    case 'body-chart': {
+      anaMode = 'chart'; anaSrc = 'body'; anaBodyKey = t.dataset.k;
+      switchTab('analysis');
+      break;
+    }
     case 'body-add': openBodySheet(); break;
     case 'body-save': saveBody(); break;
     case 'mes-add': openMesSheet(); break;
@@ -2389,8 +2427,35 @@ function scrubHandler(e){
   chartScrub(cv, x);
 }
 
+/* body の高さを実際に見えている領域へ同期（100dvh が視覚ビューポートとずれる環境向けの保険） */
+(function(){
+  const vv = window.visualViewport;
+  if(!vv) return;
+  let raf = 0;
+  function fit(){
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(()=>{
+      if(vv.scale && Math.abs(vv.scale - 1) > 0.01) return; // ピンチズーム中は触らない
+      const ae = document.activeElement;
+      if(ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT')) return; // キーボード表示中は触らない
+      const h = Math.round(vv.height);
+      if(h > 0 && Math.abs(document.body.getBoundingClientRect().height - h) > 1){
+        document.body.style.height = h + 'px';
+      }
+    });
+  }
+  vv.addEventListener('resize', fit);
+  vv.addEventListener('scroll', fit);
+  window.addEventListener('orientationchange', fit);
+  document.addEventListener('focusout', fit);
+  fit();
+})();
+
 /* ---------------- init ---------------- */
 load();
+if('serviceWorker' in navigator && (location.hostname.endsWith('.github.io') || location.hostname === 'localhost')){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
 document.addEventListener('click', onClick);
 document.addEventListener('input', onInput);
 document.addEventListener('change', onChange);
