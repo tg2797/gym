@@ -17,7 +17,9 @@ html { height:100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", sans-serif;
   background:#000000; color:#ffffff;
-  min-height:100%;
+  height:100vh; height:100dvh;
+  display:flex; flex-direction:column;
+  overflow:hidden;
   overscroll-behavior-y:none;
   touch-action:manipulation;
   -webkit-font-smoothing:antialiased;
@@ -31,8 +33,9 @@ input, select, textarea { font-family:inherit; }
 }
 
 /* ===== layout ===== */
-main { padding: calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 110px); max-width:560px; margin:0 auto; }
-.view { display:none; }
+main { flex:1; min-height:0; width:100%; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain;
+  padding: calc(env(safe-area-inset-top) + 14px) 16px 110px; }
+.view { display:none; max-width:560px; margin:0 auto; }
 .view.on { display:block; animation:fadein .22s ease; }
 @keyframes fadein { from { opacity:0; transform:translateY(4px);} to { opacity:1; transform:none;} }
 
@@ -76,7 +79,7 @@ hr.sep { border:none; border-top:0.5px solid rgba(84,84,88,0.55); margin:12px 0;
 .chips { display:flex; flex-wrap:wrap; gap:6px; }
 
 /* ===== tab bar ===== */
-#tabbar { position:fixed; left:0; right:0; bottom:0; z-index:50;
+#tabbar { position:relative; z-index:50; flex:none;
   display:flex; justify-content:space-around;
   padding:8px 8px calc(env(safe-area-inset-bottom) + 6px);
   background:rgba(18,18,20,0.82); backdrop-filter:blur(24px) saturate(1.8); -webkit-backdrop-filter:blur(24px) saturate(1.8);
@@ -612,6 +615,8 @@ function switchTab(tab){
   $$('#tabbar button').forEach(b=> b.classList.toggle('active', b.dataset.tab===tab));
   $$('.view').forEach(v=> v.classList.toggle('on', v.id === 'view-'+tab));
   renderTab(tab);
+  const mainEl = $('main');
+  if(mainEl) mainEl.scrollTop = 0;
   window.scrollTo(0,0);
 }
 function renderTab(tab){
@@ -1254,11 +1259,12 @@ function awardBadges(){
 }
 
 /* ---- rest timer ---- */
-let restEnd = 0, restTotal = 0, restTick = null;
+let restEnd = 0, restTotal = 0, restTick = null, restHideTimer = null;
 function restStart(sec){
   restTotal = sec;
   restEnd = Date.now() + sec*1000;
   $('#restPill').classList.add('on');
+  clearTimeout(restHideTimer);
   clearInterval(restTick);
   restTick = setInterval(restUpdate, 250);
   restUpdate();
@@ -1273,11 +1279,13 @@ function restUpdate(){
     vib([300,120,300]);
     beep();
     $('#rpTime').textContent = '終了！';
-    setTimeout(restStop, 2500);
+    clearTimeout(restHideTimer);
+    restHideTimer = setTimeout(restStop, 2500);
   }
 }
 function restStop(){
   clearInterval(restTick);
+  clearTimeout(restHideTimer);
   $('#restPill').classList.remove('on');
 }
 function beep(){
@@ -2239,7 +2247,15 @@ function onClick(e){
     }
 
     /* ---- rest timer ---- */
-    case 'rest-add30': restEnd += 30000; restTotal += 30; restUpdate(); break;
+    case 'rest-add30': {
+      restEnd = Math.max(Date.now(), restEnd) + 30000;
+      restTotal += 30;
+      clearTimeout(restHideTimer);
+      clearInterval(restTick);
+      restTick = setInterval(restUpdate, 250);
+      restUpdate();
+      break;
+    }
     case 'rest-skip': restStop(); break;
 
     /* ---- body ---- */
